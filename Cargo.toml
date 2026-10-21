@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/parquet-table-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+authors = ["Cody Wyatt Neiman (xangelix) <neiman@cody.to>"]
+publish = false
+
+[workspace.dependencies]
+parquet = { version = "60.0.0", default-features = false, features = [
+    "arrow",
+    "snap",
+    "zstd",
+    "lz4",
+    "brotli",
+    "flate2-zlib-rs",
+] }
+arrow-array = "60.0.0"
+arrow-schema = "60.0.0"
+arrow-cast = { version = "60.0.0", default-features = false }
+arrow-select = "60.0.0"
+arrow-ord = "60.0.0"
+concurrent-queue = "2.5.0"
+bytes = "1.12.1"
+thiserror = "2.0.21"
+# Decoders for the decompression-bomb checks: the same crates and features `parquet` uses.
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
+brotli = { version = "9.0.0", default-features = false, features = ["std"] }
+lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "frame"] }
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"

@@ -1,0 +1,26 @@
+[package]
+name = "parquet-table-core"
+description = "An egui-free engine that loads Parquet data lazily, by columns and by rows, for virtualized table views"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+parquet.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+arrow-cast.workspace = true
+arrow-select.workspace = true
+arrow-ord.workspace = true
+concurrent-queue.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+flate2.workspace = true
+brotli.workspace = true
+lz4_flex.workspace = true
+
+[lints]
+workspace = true
