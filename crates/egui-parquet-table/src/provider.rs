@@ -35,6 +35,8 @@ pub(crate) struct Columns {
     pub names: Vec<String>,
     /// Each source column's kind of values.
     pub kinds: Vec<Kind>,
+    /// Each source column's short type name, under its name in the header.
+    pub types: Vec<String>,
     /// The source columns shown, in display order.
     pub visible: Vec<usize>,
     /// Each source column's display position, `None` when hidden.
@@ -54,10 +56,16 @@ impl Columns {
             .iter()
             .map(|field| Kind::of(field.data_type()))
             .collect();
+        let types = schema
+            .fields()
+            .iter()
+            .map(|field| crate::render::type_name(field.data_type()))
+            .collect();
         let count = names.len();
         let mut columns = Self {
             names,
             kinds,
+            types,
             visible: Vec::new(),
             positions: Vec::new(),
         };
@@ -312,6 +320,16 @@ impl TableProvider for Adapter<'_> {
             .entry(column)
             .or_insert_with(|| column_tooltip(&self.0.engine.source().column_info(column)));
         Some(Cow::Owned(text.clone()))
+    }
+
+    /// The column's short type name, under its name (headers two lines tall).
+    fn header_subtitle(&self, index: usize) -> Option<Cow<'_, str>> {
+        let column = index.checked_sub(1)?;
+        self.0
+            .columns
+            .types
+            .get(column)
+            .map(|name| Cow::Borrowed(name.as_str()))
     }
 
     fn headers(&self) -> HeaderIter<'_> {

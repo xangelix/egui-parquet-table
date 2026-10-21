@@ -439,7 +439,8 @@ fn more_rows_than_32_bits_hold() {
         view.table_state().selected_rows.is_empty(),
         "past the selection's reach"
     );
-    assert!(shown.contains("Rows 9,999,999,9") || shown.iter().any(|s| s.starts_with("Rows ")));
+    assert!(shown.contains("Rows"));
+    assert!(shown.contains("of 10,000,000,000"), "{shown:?}");
 
     // The last row the selection holds.
     // (The kit scrolls a table taller than 2^22 points on a scaled offset, so here it lands
@@ -694,19 +695,30 @@ fn an_idle_view_rests() {
     assert_eq!(delay, std::time::Duration::MAX, "no repaint asked for");
     let shown = labels(&full);
     for expected in [
-        "Rows 1–",
-        "Cache ",
-        "/ 128.0 MiB",
-        "0 fetches in flight",
-        " decoded",
+        "Rows",
+        "1–",
+        "of 20,000",
+        "Cache",
+        "Read",
+        " of ",
         "page index: loaded",
+        "20,000",
+        "rows",
+        "5",
+        "columns",
     ] {
         assert!(
             shown.iter().any(|label| label.contains(expected)),
             "{expected} in {shown:?}"
         );
     }
-    assert!(shown.contains("20,000 rows × 5 columns"));
+    // Nothing is loading once the view rests.
+    assert!(!shown.contains("Loading"), "{shown:?}");
+    // Each column's type is under its name.
+    assert!(
+        shown.contains("int64") && shown.contains("text"),
+        "{shown:?}"
+    );
 
     // The glyphs drawn are in egui's default fonts: none is drawn as the replacement glyph
     // (`has_glyph` can't tell for the emoji font, which also holds the replacement).

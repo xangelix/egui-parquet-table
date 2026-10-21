@@ -34,10 +34,12 @@
 mod copy;
 mod provider;
 mod render;
+mod style;
 mod text;
 mod view;
 
 pub use crate::copy::{Copied, CopySummary};
+pub use crate::style::TableStyle;
 pub use crate::view::{TableView, TableViewOptions, TableViewOutput};
 pub use egui_table_kit;
 pub use parquet_table_core;

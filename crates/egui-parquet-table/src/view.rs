@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use egui::{Align, Button, Color32, Key, ScrollArea, TextEdit, TextStyle, Ui};
+use egui::{Align, Button, Color32, Key, Layout, RichText, ScrollArea, TextEdit, TextStyle, Ui};
 use egui_table_kit::interaction::{RowEventKind, SelectionInput, SelectionMode, TableOutput};
 use egui_table_kit::layout::{AutoSizeMode, CellInfo, Column};
 use egui_table_kit::operations::Row;
@@ -18,6 +18,7 @@ use parquet_table_core::{LazyOptions, LazyTable, Spawn, Stats, TableSource, View
 use crate::copy::{Copied, CopySummary, copy_selection};
 use crate::provider::{Adapter, CellCache, Columns, Shared};
 use crate::render::{self, Kind};
+use crate::style::{Paint, TableStyle, chip, gauge};
 use crate::text::{bytes, grouped, parse_row_number};
 
 /// Distinguishes views: each has its own layout state (scroll position, column widths).
@@ -49,13 +50,15 @@ pub struct TableViewOptions {
     pub status_line: bool,
     /// Whether rows have alternating backgrounds.
     pub striped: bool,
+    /// The colours (each one the [`Ui`]'s visuals' unless set).
+    pub style: TableStyle,
 }
 
 impl Default for TableViewOptions {
     fn default() -> Self {
         Self {
             lazy: LazyOptions::default(),
-            row_height: 20.0,
+            row_height: 26.0,
             cell_chars: 256,
             hover_chars: 4096,
             copy_max_cells: 1_000_000,
@@ -63,6 +66,7 @@ impl Default for TableViewOptions {
             toolbar: true,
             status_line: true,
             striped: true,
+            style: TableStyle::new(),
         }
     }
 }
@@ -234,6 +238,11 @@ impl TableView {
     /// The options.
     pub fn options(&self) -> &TableViewOptions {
         &self.options
+    }
+
+    /// The view's options, to change: its style when the host's theme changes, its limits.
+    pub fn options_mut(&mut self) -> &mut TableViewOptions {
+        &mut self.options
     }
 
     /// The table kit's state: the selection, the focused row.
@@ -451,7 +460,7 @@ impl TableView {
                 .size()
                 .x
         };
-        let columns = self
+        let mut columns: Vec<f32> = self
             .shared
             .columns
             .names
@@ -461,58 +470,100 @@ impl TableView {
             .collect();
         let largest = u64::try_from(self.shared.rows).unwrap_or(u64::MAX);
         let row_number = (width_of(&largest.to_string(), &mono) + 24.0).max(40.0);
+        // A view wider than its columns: the text columns share the rest (once, when the view
+        // first appears; the reader resizes them as before).
+        let used: f32 = row_number + columns.iter().sum::<f32>();
+        let spare = ui.available_width() - used - ui.spacing().scroll.bar_width - 8.0;
+        let texts = self
+            .shared
+            .columns
+            .kinds
+            .iter()
+            .filter(|kind| matches!(kind, Kind::Text | Kind::Nested))
+            .count();
+        if spare > 0.0 && texts > 0 {
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::as_conversions,
+                reason = "a handful of columns"
+            )]
+            let share = spare / texts as f32;
+            for (width, kind) in columns.iter_mut().zip(&self.shared.columns.kinds) {
+                if matches!(kind, Kind::Text | Kind::Nested) {
+                    *width += share;
+                }
+            }
+        }
         Widths {
             row_number,
             columns,
         }
     }
 
-    /// The toolbar: size, go to row, column chooser, copy, retry. Returns what a copy did.
+    /// The toolbar: the table's size on the left; Go to row, Columns, Copy, and (after a
+    /// failure) Retry on the right. Returns what a copy did.
     fn toolbar(&mut self, ui: &mut Ui) -> Option<CopySummary> {
-        let mut go = false;
-        let mut copy = false;
-        let mut retry = false;
-        let mut change = None;
-        let stats = self.shared.engine.stats();
+        let paint = self.options.style.resolve(ui);
         let rows = u64::try_from(self.shared.rows).unwrap_or(u64::MAX);
-        let columns = &self.shared.columns;
-        ui.horizontal_wrapped(|ui| {
-            ui.label(format!(
-                "{} rows × {} columns",
-                grouped(rows),
-                grouped(u64::try_from(columns.count()).unwrap_or(u64::MAX))
-            ));
-            ui.separator();
-            let label = ui.label("Go to row");
-            let field = ui
-                .add(
-                    TextEdit::singleline(&mut self.go_to)
-                        .hint_text("row number")
-                        .desired_width(110.0),
-                )
-                .labelled_by(label.id);
-            let entered = field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
-            go = ui.button("Go").clicked() || entered;
-            ui.separator();
-            ui.menu_button(
-                format!("Columns ({}/{})", columns.visible.len(), columns.count()),
-                |ui| change = column_chooser(ui, columns),
+        let columns = u64::try_from(self.shared.columns.count()).unwrap_or(u64::MAX);
+        let mut copied = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            strong_label(
+                ui,
+                &grouped(rows),
+                if rows == 1 { "row" } else { "rows" },
+                &paint,
             );
-            let can_copy = !self.state.selected_rows.is_empty() && !columns.visible.is_empty();
-            copy = ui
-                .add_enabled(can_copy, Button::new("Copy"))
-                .on_hover_text("Copy the selected rows' loaded cells as tab-separated text")
-                .on_disabled_hover_text("Select rows to copy them")
-                .clicked();
-            if stats.failed_blocks > 0 {
-                retry = ui
-                    .button("Retry failed")
-                    .on_hover_text("Read the blocks that failed again")
-                    .clicked();
-            }
+            ui.label(RichText::new("·").color(paint.muted));
+            strong_label(
+                ui,
+                &grouped(columns),
+                if columns == 1 { "column" } else { "columns" },
+                &paint,
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if self.shared.engine.stats().failed_blocks > 0
+                    && ui
+                        .button("Retry failed")
+                        .on_hover_text("Read the blocks that failed again")
+                        .clicked()
+                {
+                    self.retry_failed();
+                }
+                if ui
+                    .add_enabled(self.can_copy(), Button::new("Copy"))
+                    .on_hover_text("Copy the selected rows' loaded cells as tab-separated text")
+                    .on_disabled_hover_text("Select rows to copy them")
+                    .clicked()
+                {
+                    copied = Some(self.copy_to_clipboard(ui.ctx()));
+                }
+                let label = format!(
+                    "Columns ({}/{})",
+                    self.shared.columns.visible.len(),
+                    self.shared.columns.count()
+                );
+                ui.menu_button(label, |ui| self.column_chooser(ui));
+                self.go_to_row_field(ui);
+            });
         });
+        ui.add_space(4.0);
+        copied
+    }
 
-        if go {
+    /// A Go to row field (rows from 1; Enter goes there and selects the row), for the toolbar
+    /// or a host's own. Returns its response.
+    pub fn go_to_row_field(&mut self, ui: &mut Ui) -> egui::Response {
+        let field = ui
+            .add(
+                TextEdit::singleline(&mut self.go_to)
+                    .hint_text("Go to row…")
+                    .desired_width(110.0),
+            )
+            .on_hover_text("Go to a row (from 1) and select it: type its number, then Enter");
+        if field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
+            let rows = u64::try_from(self.shared.rows).unwrap_or(u64::MAX);
             match parse_row_number(&self.go_to) {
                 Some(number) => {
                     self.go_to_row(number.saturating_sub(1));
@@ -526,23 +577,34 @@ impl TableView {
                 }
             }
         }
-        match change {
+        field
+    }
+
+    /// The column chooser (a checkbox per column, and Show all columns), for the toolbar's menu
+    /// or a host's own. Hidden columns are never fetched.
+    pub fn column_chooser(&mut self, ui: &mut Ui) {
+        match column_chooser(ui, &self.shared.columns) {
             Some(ColumnChange::Show(column, visible)) => self.set_column_visible(column, visible),
             Some(ColumnChange::Reset) => self.reset_columns(),
             None => {}
         }
-        if retry {
-            self.retry_failed();
+    }
+
+    /// Whether Copy has something to copy: selected rows and shown columns.
+    #[must_use]
+    pub fn can_copy(&self) -> bool {
+        !self.state.selected_rows.is_empty() && !self.shared.columns.visible.is_empty()
+    }
+
+    /// Copies the selected rows' loaded cells to the clipboard as tab-separated text (with a
+    /// header row), and says what it did (on the status line too).
+    pub fn copy_to_clipboard(&mut self, ctx: &egui::Context) -> CopySummary {
+        let copied = self.copy_selection();
+        if copied.summary.rows > 0 {
+            ctx.copy_text(copied.text);
         }
-        if copy {
-            let copied = self.copy_selection();
-            if copied.summary.rows > 0 {
-                ui.ctx().copy_text(copied.text);
-            }
-            self.message = Some(copied.summary.describe());
-            return Some(copied.summary);
-        }
-        None
+        self.message = Some(copied.summary.describe());
+        copied.summary
     }
 
     /// The table, through the kit, with the row-number column pinned on the left.
@@ -577,9 +639,15 @@ impl TableView {
             })
             .collect();
 
+        let paint = self.options.style.resolve(ui);
+        let header_height = (self.options.row_height * 1.6).round().max(38.0);
         let adapter = Adapter(&self.shared);
         let mut kit = TableKit::new(self.id.clone(), &adapter, &mut self.state)
             .with_row_height(self.options.row_height)
+            .with_header_height(header_height)
+            .with_header_color(paint.header)
+            .with_striping_color(paint.stripe)
+            .with_hover_color(paint.hover)
             .with_cell_align(Align::Center)
             .with_striped(self.options.striped)
             .with_max_height(Some(height))
@@ -594,90 +662,146 @@ impl TableView {
         kit.show_with_output(
             ui,
             |ui: &mut Ui, cell: &CellInfo, row: &dyn Row, color: Color32| {
-                render::cell(ui, &adapter, cell, row, color)
+                render::cell(ui, &adapter, &paint, cell, row, color)
             },
         )
     }
 
-    /// The status line: rows in view, selection, cache, fetches, bytes read and decoded,
-    /// failures, and texts. Each item keeps its own line: in a narrow view whole items wrap.
-    /// Returns its height.
+    /// The status line: rows in view, the selection, how much of the file has been read and
+    /// how full the cache is (small gauges), loading, failures, and texts. In a narrow view whole
+    /// items wrap. Returns its height.
     fn status_line(&self, ui: &mut Ui) -> f32 {
+        let paint = self.options.style.resolve(ui);
         let stats = self.shared.engine.stats();
         let total = u64::try_from(self.shared.rows).unwrap_or(u64::MAX);
         let source = self.shared.engine.source();
         let (read, len) = (source.bytes_read(), source.byte_len());
-        ui.horizontal_wrapped(|ui| {
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-            let rows = &self.view.rows;
-            if rows.is_empty() {
-                ui.label(format!("{} rows", grouped(total)));
-            } else {
-                ui.label(format!(
-                    "Rows {}–{} of {}",
-                    grouped(rows.start.saturating_add(1)),
-                    grouped(rows.end),
-                    grouped(total)
-                ));
-            }
-            let selected = self.state.selected_rows.len();
-            if selected > 0 {
-                ui.separator();
-                ui.label(format!("{} selected", grouped(selected)));
-            }
-            ui.separator();
-            ui.label(format!(
-                "Cache {} / {}",
-                bytes(stats.cached_bytes),
-                bytes(self.options.lazy.cache_bytes)
-            ));
-            ui.separator();
-            ui.label(format!(
-                "{} {} in flight",
-                grouped(u64::try_from(stats.inflight_jobs).unwrap_or(u64::MAX)),
-                if stats.inflight_jobs == 1 {
-                    "fetch"
-                } else {
-                    "fetches"
-                }
-            ));
-            if let Some(read) = read {
-                ui.separator();
-                match len {
-                    Some(len) => ui.label(format!("Read {} of {}", bytes(read), bytes(len))),
-                    None => ui.label(format!("Read {}", bytes(read))),
-                };
-            }
-            ui.separator();
-            ui.label(format!("{} decoded", bytes(stats.bytes_fetched)));
-            if stats.failed_blocks > 0 {
-                ui.separator();
-                ui.colored_label(
-                    ui.visuals().error_fg_color,
-                    format!(
-                        "{} {} failed",
-                        grouped(u64::try_from(stats.failed_blocks).unwrap_or(u64::MAX)),
-                        if stats.failed_blocks == 1 {
-                            "block"
-                        } else {
-                            "blocks"
+        egui::Frame::new()
+            .fill(paint.gutter)
+            .stroke(egui::Stroke::new(1.0, paint.border))
+            .corner_radius(egui::CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(10, 5))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let rows = &self.view.rows;
+                    if rows.is_empty() {
+                        strong_label(ui, &grouped(total), "rows", &paint);
+                    } else {
+                        ui.label(RichText::new("Rows").color(paint.muted));
+                        ui.label(
+                            RichText::new(format!(
+                                "{}–{}",
+                                grouped(rows.start.saturating_add(1)),
+                                grouped(rows.end)
+                            ))
+                            .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!("of {}", grouped(total))).color(paint.muted),
+                        );
+                    }
+                    let selected = self.state.selected_rows.len();
+                    if selected > 0 {
+                        gap(ui);
+                        ui.label(
+                            RichText::new(format!("{} selected", grouped(selected)))
+                                .color(paint.accent),
+                        );
+                    }
+                    if let Some(read) = read {
+                        gap(ui);
+                        ui.label(RichText::new("Read").color(paint.muted));
+                        let text = match len {
+                            Some(len) => format!("{} of {}", bytes(read), bytes(len)),
+                            None => bytes(read),
+                        };
+                        if let Some(len) = len.filter(|len| *len > 0) {
+                            #[allow(
+                                clippy::cast_precision_loss,
+                                clippy::as_conversions,
+                                reason = "a gauge's fraction"
+                            )]
+                            let fraction = read as f32 / len as f32;
+                            gauge(
+                                ui,
+                                &paint,
+                                fraction,
+                                "How much of the file has been read: only the columns and rows \
+                                 viewed, and a margin around them",
+                            );
                         }
-                    ),
-                );
-            }
-            if let Some(text) = &self.status_text {
-                ui.separator();
-                ui.label(text.as_str());
-            }
-            if let Some(message) = &self.message {
-                ui.separator();
-                ui.label(message.as_str());
-            }
-        })
-        .response
-        .rect
-        .height()
+                        ui.label(RichText::new(text).monospace());
+                    }
+                    gap(ui);
+                    ui.label(RichText::new("Cache").color(paint.muted));
+                    let budget = self.options.lazy.cache_bytes;
+                    if budget > 0 {
+                        #[allow(
+                            clippy::cast_precision_loss,
+                            clippy::as_conversions,
+                            reason = "a gauge's fraction"
+                        )]
+                        let fraction = stats.cached_bytes as f32 / budget as f32;
+                        gauge(
+                            ui,
+                            &paint,
+                            fraction,
+                            &format!(
+                                "{} of decoded values cached, of {}",
+                                bytes(stats.cached_bytes),
+                                bytes(budget)
+                            ),
+                        );
+                    }
+                    ui.label(RichText::new(bytes(stats.cached_bytes)).monospace());
+                    if stats.inflight_jobs > 0 {
+                        gap(ui);
+                        ui.add(egui::Spinner::new().size(12.0).color(paint.accent));
+                        ui.label(RichText::new("Loading").color(paint.muted));
+                    }
+                    if stats.failed_blocks > 0 {
+                        gap(ui);
+                        ui.label(
+                            RichText::new(format!(
+                                "{} {} failed",
+                                grouped(u64::try_from(stats.failed_blocks).unwrap_or(u64::MAX)),
+                                if stats.failed_blocks == 1 {
+                                    "block"
+                                } else {
+                                    "blocks"
+                                }
+                            ))
+                            .color(paint.danger),
+                        );
+                    }
+                    if let Some(text) = &self.status_text {
+                        gap(ui);
+                        chip(ui, &paint, text);
+                    }
+                    if let Some(message) = &self.message {
+                        gap(ui);
+                        ui.label(RichText::new(message.as_str()).color(paint.muted));
+                    }
+                });
+            })
+            .response
+            .rect
+            .height()
     }
+}
+
+/// A count in bold followed by its noun, muted.
+fn strong_label(ui: &mut Ui, count: &str, noun: &str, paint: &Paint) {
+    ui.label(RichText::new(count).strong());
+    ui.label(RichText::new(noun).color(paint.muted));
+}
+
+/// The space between items of the status line.
+fn gap(ui: &mut Ui) {
+    ui.add_space(10.0);
 }
 
 /// The column chooser's menu: a checkbox per column (only those scrolled into view are laid
