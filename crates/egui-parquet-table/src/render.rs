@@ -206,17 +206,7 @@ pub(crate) fn cell(
 ) -> Option<Response> {
     let row = u64::try_from(row.row_index()?).ok()?;
     let Some(column) = cell.col_nr.checked_sub(1) else {
-        // The gutter: its own background and a hairline on its right edge.
-        let spacing = ui.spacing().item_spacing;
-        let rect = ui
-            .max_rect()
-            .expand2(egui::vec2(spacing.x * 0.5, spacing.y * 0.5));
-        ui.painter().rect_filled(rect, 0.0, paint.gutter);
-        ui.painter().vline(
-            rect.right() - 0.5,
-            rect.y_range(),
-            egui::Stroke::new(1.0, paint.border),
-        );
+        // The gutter (the kit fills it and draws its edge).
         let number = row.checked_add(1)?.to_string();
         let text = RichText::new(number).small().monospace().color(paint.muted);
         return Some(label(ui, text, true, true));

@@ -655,7 +655,9 @@ impl TableView {
             .with_focus_outline(false)
             .with_columns(columns)
             .with_column_map(map)
-            .with_sticky_columns(1);
+            .with_sticky_columns(1)
+            .with_sticky_fill(paint.gutter)
+            .with_sticky_edge(egui::Stroke::new(1.0, paint.border));
         if let Some(row) = self.scroll_to.take() {
             kit = kit.with_scroll_to_row(row, Align::Center);
         }
