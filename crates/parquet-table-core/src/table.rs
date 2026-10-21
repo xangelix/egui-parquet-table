@@ -86,4 +86,15 @@ pub trait TableSource: Send + Sync + 'static {
     fn column_count(&self) -> usize {
         self.schema().fields().len()
     }
+
+    /// Bytes read from the underlying file so far, if the source counts them (to show how
+    /// little of a file a view has read). `None` by default.
+    fn bytes_read(&self) -> Option<u64> {
+        None
+    }
+
+    /// The underlying file's length in bytes, if the source has one. `None` by default.
+    fn byte_len(&self) -> Option<u64> {
+        None
+    }
 }

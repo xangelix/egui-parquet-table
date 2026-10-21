@@ -134,6 +134,8 @@ pub struct TableView {
     scroll_to: Option<u64>,
     status_text: Option<String>,
     message: Option<String>,
+    /// The status line's height last frame (it wraps onto more lines in a narrow view).
+    status_height: Option<f32>,
 }
 
 impl core::fmt::Debug for TableView {
@@ -149,17 +151,36 @@ impl core::fmt::Debug for TableView {
     }
 }
 
+/// How soon to look again while fetches are in flight (about two frames).
+const IN_FLIGHT_POLL: Duration = Duration::from_millis(33);
+
+/// What a finished fetch calls: a repaint of `ctx` natively. On WebAssembly nothing (a
+/// threaded build's `Context` is not `Send`): the view polls while fetches are in flight.
+#[cfg(not(target_family = "wasm"))]
+fn wake(ctx: &egui::Context) -> Arc<dyn Fn() + Send + Sync> {
+    let ctx = ctx.clone();
+    Arc::new(move || ctx.request_repaint())
+}
+
+/// What a finished fetch calls: a repaint of `ctx` natively. On WebAssembly nothing (a
+/// threaded build's `Context` is not `Send`): the view polls while fetches are in flight.
+#[cfg(target_family = "wasm")]
+fn wake(_ctx: &egui::Context) -> Arc<dyn Fn() + Send + Sync> {
+    Arc::new(|| {})
+}
+
 impl TableView {
-    /// A view of `source`. Fetches run on `spawner`; each finished fetch requests a repaint of
-    /// `ctx`. Shows every column, nothing selected, at the first row.
+    /// A view of `source`. Fetches run on `spawner`. Natively each finished fetch requests a
+    /// repaint of `ctx`; on WebAssembly, where a threaded build's `Context` can't be shared with
+    /// workers, the view asks for frames itself while fetches are in flight (the interface
+    /// thread never waits either way). Shows every column, nothing selected, at the first row.
     pub fn new(
         source: Arc<dyn TableSource>,
         spawner: Arc<dyn Spawn>,
         ctx: &egui::Context,
         options: TableViewOptions,
     ) -> Self {
-        let wake_ctx = ctx.clone();
-        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || wake_ctx.request_repaint());
+        let wake = wake(ctx);
         let columns = Columns::new(source.schema());
         let rows = usize::try_from(source.row_count()).unwrap_or(usize::MAX);
         let engine = LazyTable::new(source, spawner, wake, options.lazy.clone());
@@ -191,6 +212,7 @@ impl TableView {
             scroll_to: None,
             status_text: None,
             message: None,
+            status_height: None,
         }
     }
 
@@ -342,7 +364,9 @@ impl TableView {
         };
 
         let status_height = if self.options.status_line {
-            ui.text_style_height(&TextStyle::Body) + 2.0 * ui.spacing().item_spacing.y
+            self.status_height.unwrap_or_else(|| {
+                ui.text_style_height(&TextStyle::Body) + 2.0 * ui.spacing().item_spacing.y
+            })
         } else {
             0.0
         };
@@ -371,6 +395,11 @@ impl TableView {
             && let Ok(after) = Duration::try_from_secs_f64(after.max(0.0))
         {
             ui.ctx().request_repaint_after(after);
+        }
+        // Fetches in flight: look again shortly, wherever a worker can't wake the interface
+        // (and as a backstop where it can).
+        if self.shared.engine.stats().inflight_jobs > 0 {
+            ui.ctx().request_repaint_after(IN_FLIGHT_POLL);
         }
 
         let mut output = TableViewOutput {
@@ -404,7 +433,8 @@ impl TableView {
             }
         }
         if self.options.status_line {
-            self.status_line(ui);
+            let used = self.status_line(ui);
+            self.status_height = Some(used + 2.0 * ui.spacing().item_spacing.y);
         }
         output
     }
@@ -569,11 +599,16 @@ impl TableView {
         )
     }
 
-    /// The status line: rows in view, selection, cache, fetches, failures, and texts.
-    fn status_line(&self, ui: &mut Ui) {
+    /// The status line: rows in view, selection, cache, fetches, bytes read and decoded,
+    /// failures, and texts. Each item keeps its own line: in a narrow view whole items wrap.
+    /// Returns its height.
+    fn status_line(&self, ui: &mut Ui) -> f32 {
         let stats = self.shared.engine.stats();
         let total = u64::try_from(self.shared.rows).unwrap_or(u64::MAX);
+        let source = self.shared.engine.source();
+        let (read, len) = (source.bytes_read(), source.byte_len());
         ui.horizontal_wrapped(|ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             let rows = &self.view.rows;
             if rows.is_empty() {
                 ui.label(format!("{} rows", grouped(total)));
@@ -606,8 +641,15 @@ impl TableView {
                     "fetches"
                 }
             ));
+            if let Some(read) = read {
+                ui.separator();
+                match len {
+                    Some(len) => ui.label(format!("Read {} of {}", bytes(read), bytes(len))),
+                    None => ui.label(format!("Read {}", bytes(read))),
+                };
+            }
             ui.separator();
-            ui.label(format!("{} fetched", bytes(stats.bytes_fetched)));
+            ui.label(format!("{} decoded", bytes(stats.bytes_fetched)));
             if stats.failed_blocks > 0 {
                 ui.separator();
                 ui.colored_label(
@@ -631,7 +673,10 @@ impl TableView {
                 ui.separator();
                 ui.label(message.as_str());
             }
-        });
+        })
+        .response
+        .rect
+        .height()
     }
 }
 

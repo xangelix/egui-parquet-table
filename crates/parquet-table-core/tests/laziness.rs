@@ -237,3 +237,19 @@ fn a_wide_file_reads_only_the_requested_columns() {
         counting.calls()
     );
 }
+
+/// Through the format-independent trait, a Parquet source reports what it has read and the
+/// file's length, so a view can show how little of a file it has read.
+#[test]
+fn the_table_trait_reports_bytes_read_and_the_files_length() {
+    let bytes = flat_file(50_000, &Options::default());
+    let (counting, source) = open(&bytes, &ParquetLimits::default());
+    let table: &dyn TableSource = &source;
+    assert_eq!(table.byte_len(), Some(bytes.len() as u64));
+    assert_eq!(table.bytes_read(), Some(counting.bytes()));
+    let block = table.block_of(0, 0).unwrap();
+    let before = counting.bytes();
+    table.fetch(&[block], &CancelToken::new()).unwrap();
+    assert!(counting.bytes() > before);
+    assert_eq!(table.bytes_read(), Some(counting.bytes()));
+}

@@ -698,7 +698,7 @@ fn an_idle_view_rests() {
         "Cache ",
         "/ 128.0 MiB",
         "0 fetches in flight",
-        " fetched",
+        " decoded",
         "page index: loaded",
     ] {
         assert!(

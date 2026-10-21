@@ -791,6 +791,14 @@ impl<B: ByteSource> TableSource for ParquetSource<B> {
         &self.schema
     }
 
+    fn bytes_read(&self) -> Option<u64> {
+        Some(Self::bytes_read(self))
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.source().len())
+    }
+
     fn row_count(&self) -> u64 {
         self.layout.rows()
     }
