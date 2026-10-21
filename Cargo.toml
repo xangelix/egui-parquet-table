@@ -32,9 +32,9 @@ flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] 
 brotli = { version = "9.0.0", default-features = false, features = ["std"] }
 lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "frame"] }
 # The widget.
-parquet-table-core = { path = "crates/parquet-table-core" }
+parquet-table-core = { version = "0.1.0", path = "crates/parquet-table-core" }
 egui = "0.36.2"
-egui-table-kit = { path = "../egui-table-kit" }
+egui-table-kit = { version = "0.8.0", path = "../egui-table-kit" }
 eframe = "0.36.2"
 
 [workspace.lints.rust]
