@@ -458,6 +458,29 @@ fn permanent_failures_and_limits_are_shown_and_not_retried() {
 }
 
 #[test]
+fn ready_blocks_are_the_cached_ones_and_never_failures() {
+    let mock = Mock::new(2, 10_000, 1_000);
+    mock.fail(mock.block(1, 0), &[FetchErrorKind::Permanent]);
+    let options = LazyOptions {
+        max_columns_per_fetch: 1,
+        prefetch_viewports: 0.0,
+        prefetch_bias_viewports: 0.0,
+        prefetch_columns: 0,
+        ..LazyOptions::default()
+    };
+    let (mut table, _) = table(mock.clone(), Arc::new(Inline), options);
+    assert_eq!(table.ready_blocks().count(), 0);
+    table.update(&view(0, 40, 0..2), 0.0);
+    table.update(&view(0, 40, 0..2), 0.01);
+    let ready: Vec<BlockId> = table.ready_blocks().collect();
+    assert_eq!(ready, vec![mock.block(0, 0)]);
+    assert!(matches!(table.cell(0, 1), Cell::Failed(_)));
+    let fetches = mock.fetched_blocks().len();
+    let _ = table.ready_blocks().count();
+    assert_eq!(mock.fetched_blocks().len(), fetches, "never fetches");
+}
+
+#[test]
 fn cells_out_of_range() {
     let mock = Mock::new(2, 100, 10);
     let (mut table, _) = table(mock, Arc::new(Inline), LazyOptions::default());

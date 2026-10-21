@@ -373,6 +373,16 @@ impl LazyTable {
         }
     }
 
+    /// The blocks whose data is cached (those [`cell`](Self::cell) shows as ready), in no
+    /// particular order. Never fetches: a widget uses it to visit only loaded rows (copying a
+    /// selection of billions of rows, for instance) in time bounded by the cache.
+    pub fn ready_blocks(&self) -> impl Iterator<Item = BlockId> + '_ {
+        self.cache
+            .iter()
+            .filter(|(_, slot)| matches!(slot.entry, Entry::Ready { .. }))
+            .map(|(block, _)| *block)
+    }
+
     /// Seconds until the table wants another [`update`](Self::update) without new input
     /// (the settle timer or a retry), or `None`. Results arriving from workers call `wake`
     /// instead.
