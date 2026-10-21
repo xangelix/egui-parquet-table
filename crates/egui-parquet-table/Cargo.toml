@@ -1,0 +1,37 @@
+[package]
+name = "egui-parquet-table"
+description = "An egui widget that shows Parquet data (or any lazily fetched table) in a virtualized, lazily loading table"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "egui_parquet_table"
+
+[dependencies]
+parquet-table-core.workspace = true
+egui.workspace = true
+egui-table-kit.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+# `egui-table-kit` seeds its hash tables through `ahash`'s runtime RNG, which is `getrandom` 0.3:
+# on `wasm32-unknown-unknown` (a browser, for egui) it needs its JavaScript backend chosen. Not
+# cryptography. It must be the major `ahash` uses.
+getrandom = { version = ">=0.3.4, <0.4", features = ["wasm_js"] }
+
+[dev-dependencies]
+arrow-array.workspace = true
+bytes.workspace = true
+eframe.workspace = true
+parquet.workspace = true
+
+[[example]]
+name = "viewer"
+# The example's own tests (its demo file and thread pool) run with `cargo test`.
+test = true
+
+[lints]
+workspace = true

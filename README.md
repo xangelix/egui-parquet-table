@@ -5,7 +5,7 @@ Lazy, virtualized table views over Parquet data.
 | Crate | What it is |
 | --- | --- |
 | [`parquet-table-core`](crates/parquet-table-core) | The engine, free of any UI toolkit: reads only the columns and rows in view, caches decoded blocks, and decides from the scroll motion when to fetch. |
-| `egui-parquet-table` | The egui widget over the engine (not written yet). |
+| [`egui-parquet-table`](crates/egui-parquet-table) | The egui widget over the engine: `TableView`, for any `TableSource`. |
 
 ## parquet-table-core
 
@@ -53,6 +53,26 @@ match table.cell(3, 2) {
 
 `cargo run --release --example scroll_sim` writes a 5-million-row file and simulates a
 fling from the first row to the last.
+
+## egui-parquet-table
+
+`TableView` draws a `TableSource` through
+[`egui-table-kit`](https://github.com/xangelix/egui-table-kit)'s lazy mode. The caller owns
+it and calls `show(ui)` every frame; it never blocks or locks, and takes its time from egui's
+input. It has:
+
+- a sticky row-number column, values styled by Arrow type (numbers right-aligned in
+  monospace, nulls dimmed and italic, binary as short hex, nested values compact, long text cut
+  with the rest on hover, undisplayable values as `⚠`), starting widths by type, resizable;
+- column descriptions on the headers (types, codecs, sizes, nulls, range);
+- a toolbar: size, Go to row, a column chooser (hidden columns are never fetched), Copy (the
+  selected rows' loaded cells as TSV with a header row, bounded, saying what was left out), and
+  Retry failed;
+- a status line: the rows in view, the selection, the cache against its budget, fetches in
+  flight, bytes fetched, failures, and an optional caller text.
+
+`cargo run --release --example viewer -- FILE.parquet` opens a file (or, without one, writes and
+opens a demo file of 2,000,000 rows and 30 columns).
 
 ## License
 
