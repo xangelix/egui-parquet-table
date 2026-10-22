@@ -5,7 +5,6 @@ members = ["crates/parquet-table-core", "crates/egui-parquet-table"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
 license = "MIT"
 authors = ["Cody Wyatt Neiman (xangelix) <neiman@cody.to>"]
 publish = false

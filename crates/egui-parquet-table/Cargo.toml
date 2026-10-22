@@ -3,7 +3,6 @@ name = "egui-parquet-table"
 description = "An egui widget that shows Parquet data (or any lazily fetched table) in a virtualized, lazily loading table"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 publish.workspace = true

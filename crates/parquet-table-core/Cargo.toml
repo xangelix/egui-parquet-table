@@ -3,7 +3,6 @@ name = "parquet-table-core"
 description = "An egui-free engine that loads Parquet data lazily, by columns and by rows, for virtualized table views"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 publish.workspace = true
