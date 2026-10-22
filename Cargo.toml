@@ -33,7 +33,7 @@ lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "f
 # The widget.
 parquet-table-core = { version = "0.1.0", path = "crates/parquet-table-core" }
 egui = "0.36.2"
-egui-table-kit = { version = "0.8.0", path = "../egui-table-kit" }
+egui-table-kit = { version = "0.8.0", git = "https://github.com/xangelix/egui-table-kit", rev = "48c9f211d96eb5b96a2d10fbf6f0e160395eeab9" }
 eframe = "0.36.2"
 
 [workspace.lints.rust]
